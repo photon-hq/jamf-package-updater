@@ -1,11 +1,50 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use reqwest::multipart;
+use serde_json::Value;
 use std::path::Path;
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
 use crate::api::client::JamfClient;
 use crate::models::package::{Package, PackageCreateRequest, PackageSearchResponse};
+
+#[derive(Debug, Clone, Default)]
+pub struct PackageDigestSnapshot {
+    pub md5_hash: Option<String>,
+    pub hash_type: Option<String>,
+    pub hash_value: Option<String>,
+    pub file_size: Option<u64>,
+}
+
+impl PackageDigestSnapshot {
+    pub fn is_empty(&self) -> bool {
+        self.md5_hash.is_none()
+            && self.hash_type.is_none()
+            && self.hash_value.is_none()
+            && self.file_size.is_none()
+    }
+
+    pub fn differs_from(&self, old: &Self) -> bool {
+        field_changed(old.md5_hash.as_deref(), self.md5_hash.as_deref())
+            || field_changed(old.hash_type.as_deref(), self.hash_type.as_deref())
+            || field_changed(old.hash_value.as_deref(), self.hash_value.as_deref())
+            || field_changed(old.file_size.as_ref(), self.file_size.as_ref())
+    }
+
+    pub fn display_line(&self) -> String {
+        let md5 = self.md5_hash.as_deref().unwrap_or("unknown");
+        let hash_type = self.hash_type.as_deref().unwrap_or("unknown");
+        let hash_value = self.hash_value.as_deref().unwrap_or("unknown");
+        let file_size = self
+            .file_size
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        format!(
+            "md5={}, hash={} {}, file_size={}",
+            md5, hash_type, hash_value, file_size
+        )
+    }
+}
 
 impl JamfClient {
     /// Find a package by name. Returns None if not found.
@@ -55,7 +94,11 @@ impl JamfClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            bail!("Failed to update package metadata (HTTP {}): {}", status, body);
+            bail!(
+                "Failed to update package metadata (HTTP {}): {}",
+                status,
+                body
+            );
         }
 
         Ok(())
@@ -139,10 +182,58 @@ impl JamfClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            bail!("Failed to refresh JCDS inventory (HTTP {}): {}", status, body);
+            bail!(
+                "Failed to refresh JCDS inventory (HTTP {}): {}",
+                status,
+                body
+            );
         }
 
         Ok(())
+    }
+
+    /// Read package digest/checksum fields as currently reported by Jamf Pro.
+    pub async fn get_package_digest_snapshot(
+        &self,
+        id: &str,
+    ) -> Result<Option<PackageDigestSnapshot>> {
+        let url = format!("{}/api/v1/packages/{}", self.base_url, id);
+
+        let resp = self
+            .http
+            .get(&url)
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .context("Failed to read package details")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Failed to read package details (HTTP {}): {}", status, body);
+        }
+
+        let payload: Value = resp
+            .json()
+            .await
+            .context("Failed to parse package details response")?;
+
+        let snapshot = PackageDigestSnapshot {
+            md5_hash: find_first_string(
+                &payload,
+                &["md5Hash", "md5", "md5Checksum", "md5Sum", "MD5"],
+            ),
+            hash_type: find_first_string(&payload, &["hashType", "checksumType"]),
+            hash_value: find_first_string(&payload, &["hashValue", "checksum", "hash"]),
+            file_size: find_first_u64(&payload, &["fileSize", "size", "fileSizeBytes"]),
+        };
+
+        if snapshot.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(snapshot))
+        }
     }
 }
 
@@ -154,4 +245,105 @@ fn urlencoding(s: &str) -> String {
         .replace('#', "%23")
         .replace('&', "%26")
         .replace('+', "%2B")
+}
+
+fn field_changed<T: PartialEq + ?Sized>(old: Option<&T>, new: Option<&T>) -> bool {
+    match (old, new) {
+        (Some(old), Some(new)) => old != new,
+        _ => false,
+    }
+}
+
+fn find_first_string(value: &Value, keys: &[&str]) -> Option<String> {
+    match value {
+        Value::Object(map) => {
+            for key in keys {
+                if let Some(found) = map.get(*key).and_then(value_to_string) {
+                    return Some(found);
+                }
+            }
+            for nested in map.values() {
+                if let Some(found) = find_first_string(nested, keys) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Array(items) => items.iter().find_map(|item| find_first_string(item, keys)),
+        _ => None,
+    }
+}
+
+fn find_first_u64(value: &Value, keys: &[&str]) -> Option<u64> {
+    match value {
+        Value::Object(map) => {
+            for key in keys {
+                if let Some(found) = map.get(*key).and_then(value_to_u64) {
+                    return Some(found);
+                }
+            }
+            for nested in map.values() {
+                if let Some(found) = find_first_u64(nested, keys) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Array(items) => items.iter().find_map(|item| find_first_u64(item, keys)),
+        _ => None,
+    }
+}
+
+fn value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        }
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+fn value_to_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(n) => n.as_u64(),
+        Value::String(s) => s.parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{PackageDigestSnapshot, find_first_string, find_first_u64};
+
+    #[test]
+    fn parses_digest_fields_from_nested_json() {
+        let payload = json!({
+            "packageName": "demo",
+            "distributionPointFileInfo": {
+                "md5Hash": "abc123",
+                "hashType": "SHA3_512",
+                "hashValue": "def456",
+                "fileSize": 42
+            }
+        });
+
+        let snapshot = PackageDigestSnapshot {
+            md5_hash: find_first_string(&payload, &["md5Hash", "md5"]),
+            hash_type: find_first_string(&payload, &["hashType"]),
+            hash_value: find_first_string(&payload, &["hashValue"]),
+            file_size: find_first_u64(&payload, &["fileSize"]),
+        };
+
+        assert_eq!(snapshot.md5_hash.as_deref(), Some("abc123"));
+        assert_eq!(snapshot.hash_type.as_deref(), Some("SHA3_512"));
+        assert_eq!(snapshot.hash_value.as_deref(), Some("def456"));
+        assert_eq!(snapshot.file_size, Some(42));
+    }
 }

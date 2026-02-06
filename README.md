@@ -19,6 +19,7 @@ and confirms which policies are affected.
 - Updates package metadata in place (same package ID).
 - Uploads a new `.pkg` or `.dmg` file with retry support.
 - Triggers JCDS inventory refresh so checksums are recalculated.
+- Verifies digest metadata changes after refresh and errors if Jamf still reports old values.
 
 ## Requirements
 

@@ -1,10 +1,16 @@
 use std::path::Path;
+use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
+use tokio::time::sleep;
 
 use crate::api::client::JamfClient;
+use crate::api::packages::PackageDigestSnapshot;
 use crate::credentials;
 use crate::models::package::PackageCreateRequest;
+
+const DIGEST_POLL_ATTEMPTS: usize = 12;
+const DIGEST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
     // 1. Resolve package name
@@ -61,6 +67,12 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
         package_name, pkg_id, old_package.file_name
     );
 
+    let previous_digest = client.get_package_digest_snapshot(&pkg_id).await?;
+    match &previous_digest {
+        Some(digest) => println!("Current package digest: {}", digest.display_line()),
+        None => println!("Current package digest metadata is unavailable via API."),
+    }
+
     // 5. Scan policies for references to this package
     println!("Scanning policies...");
     let affected_policies = client
@@ -93,6 +105,21 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
     // 8. Refresh JCDS inventory to recalculate checksums
     println!("Refreshing package inventory (recalculating checksums)...");
     client.refresh_jcds_inventory().await?;
+    println!("Inventory refresh requested.");
+
+    if let Some(previous) = previous_digest.as_ref() {
+        println!("Waiting for Jamf digest metadata to update...");
+        let refreshed_digest = wait_for_digest_change(&client, &pkg_id, previous).await?;
+        println!("Digest updated: {}", refreshed_digest.display_line());
+    } else {
+        let current_digest = client.get_package_digest_snapshot(&pkg_id).await?;
+        if let Some(digest) = current_digest {
+            println!("Current digest after upload: {}", digest.display_line());
+        } else {
+            println!("Digest metadata is still unavailable; skipping digest verification.");
+        }
+    }
+
     println!("Inventory refreshed.");
 
     println!(
@@ -112,4 +139,62 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn wait_for_digest_change(
+    client: &JamfClient,
+    package_id: &str,
+    previous: &PackageDigestSnapshot,
+) -> Result<PackageDigestSnapshot> {
+    let mut latest_snapshot: Option<PackageDigestSnapshot> = None;
+
+    for attempt in 1..=DIGEST_POLL_ATTEMPTS {
+        match client.get_package_digest_snapshot(package_id).await? {
+            Some(current) => {
+                if current.differs_from(previous) {
+                    return Ok(current);
+                }
+
+                latest_snapshot = Some(current);
+                if attempt < DIGEST_POLL_ATTEMPTS {
+                    println!(
+                        "  Attempt {}/{}: digest unchanged, waiting {}s...",
+                        attempt,
+                        DIGEST_POLL_ATTEMPTS,
+                        DIGEST_POLL_INTERVAL.as_secs()
+                    );
+                }
+            }
+            None => {
+                if attempt < DIGEST_POLL_ATTEMPTS {
+                    println!(
+                        "  Attempt {}/{}: digest metadata unavailable, waiting {}s...",
+                        attempt,
+                        DIGEST_POLL_ATTEMPTS,
+                        DIGEST_POLL_INTERVAL.as_secs()
+                    );
+                }
+            }
+        }
+
+        if attempt < DIGEST_POLL_ATTEMPTS {
+            sleep(DIGEST_POLL_INTERVAL).await;
+        }
+    }
+
+    let previous_line = previous.display_line();
+    if let Some(latest) = latest_snapshot {
+        bail!(
+            "Upload completed but Jamf digest metadata did not change after {} seconds. Previous digest: {}. Latest digest: {}. If you intentionally uploaded an identical file, this can be expected.",
+            DIGEST_POLL_ATTEMPTS as u64 * DIGEST_POLL_INTERVAL.as_secs(),
+            previous_line,
+            latest.display_line()
+        );
+    }
+
+    bail!(
+        "Upload completed but Jamf digest metadata remained unavailable after {} seconds. Previous digest: {}.",
+        DIGEST_POLL_ATTEMPTS as u64 * DIGEST_POLL_INTERVAL.as_secs(),
+        previous_line
+    );
 }
