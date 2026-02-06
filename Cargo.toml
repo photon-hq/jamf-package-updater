@@ -14,3 +14,4 @@ quick-xml = { version = "0.37", features = ["serialize"] }
 keyring = { version = "3", features = ["apple-native", "linux-native"] }
 anyhow = "1"
 thiserror = "2"
+md-5 = "0.10"

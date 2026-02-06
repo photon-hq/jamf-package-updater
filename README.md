@@ -20,6 +20,7 @@ and confirms which policies are affected.
 - Uploads a new `.pkg` or `.dmg` file with retry support.
 - Triggers JCDS inventory refresh so checksums are recalculated.
 - Verifies digest metadata changes after refresh and errors if Jamf still reports old values.
+- Skips the update entirely when local file MD5 already matches Jamf package MD5.
 
 ## Requirements
 

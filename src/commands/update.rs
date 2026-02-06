@@ -2,6 +2,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use md5::{Digest, Md5};
+use tokio::io::AsyncReadExt;
 use tokio::time::sleep;
 
 use crate::api::client::JamfClient;
@@ -71,6 +73,20 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
     match &previous_digest {
         Some(digest) => println!("Current package digest: {}", digest.display_line()),
         None => println!("Current package digest metadata is unavailable via API."),
+    }
+
+    // Exit early when Jamf already has the same payload (MD5 match).
+    if let Some(remote_md5) = previous_digest.as_ref().and_then(|d| d.md5_hash.as_deref()) {
+        let local_md5 = compute_file_md5(path).await?;
+        println!("Local file MD5: {}", local_md5);
+        if remote_md5.eq_ignore_ascii_case(&local_md5) {
+            println!("Package payload already matches Jamf (MD5 unchanged).");
+            println!(
+                "Package '{}' (ID: {}) is already up to date. Skipping update.",
+                package_name, pkg_id
+            );
+            return Ok(());
+        }
     }
 
     // 5. Scan policies for references to this package
@@ -248,4 +264,25 @@ async fn wait_for_digest_availability(
         "Upload completed but Jamf digest metadata remained unavailable after {} seconds.",
         DIGEST_POLL_ATTEMPTS as u64 * DIGEST_POLL_INTERVAL.as_secs()
     );
+}
+
+async fn compute_file_md5(path: &Path) -> Result<String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .with_context(|| format!("Failed to open file for MD5: {}", path.display()))?;
+    let mut hasher = Md5::new();
+    let mut buf = [0_u8; 8192];
+
+    loop {
+        let n = file
+            .read(&mut buf)
+            .await
+            .with_context(|| format!("Failed reading file for MD5: {}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
 }
