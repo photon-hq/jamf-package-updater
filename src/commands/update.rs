@@ -112,12 +112,9 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
         let refreshed_digest = wait_for_digest_change(&client, &pkg_id, previous).await?;
         println!("Digest updated: {}", refreshed_digest.display_line());
     } else {
-        let current_digest = client.get_package_digest_snapshot(&pkg_id).await?;
-        if let Some(digest) = current_digest {
-            println!("Current digest after upload: {}", digest.display_line());
-        } else {
-            println!("Digest metadata is still unavailable; skipping digest verification.");
-        }
+        println!("Waiting for Jamf digest metadata to become available...");
+        let digest = wait_for_digest_availability(&client, &pkg_id).await?;
+        println!("Digest updated: {}", digest.display_line());
     }
 
     println!("Inventory refreshed.");
@@ -151,14 +148,14 @@ async fn wait_for_digest_change(
     for attempt in 1..=DIGEST_POLL_ATTEMPTS {
         match client.get_package_digest_snapshot(package_id).await? {
             Some(current) => {
-                if current.differs_from(previous) {
+                if current.content_updated_from(previous) {
                     return Ok(current);
                 }
 
                 latest_snapshot = Some(current);
                 if attempt < DIGEST_POLL_ATTEMPTS {
                     println!(
-                        "  Attempt {}/{}: digest unchanged, waiting {}s...",
+                        "  Attempt {}/{}: digest value not updated yet, waiting {}s...",
                         attempt,
                         DIGEST_POLL_ATTEMPTS,
                         DIGEST_POLL_INTERVAL.as_secs()
@@ -196,5 +193,59 @@ async fn wait_for_digest_change(
         "Upload completed but Jamf digest metadata remained unavailable after {} seconds. Previous digest: {}.",
         DIGEST_POLL_ATTEMPTS as u64 * DIGEST_POLL_INTERVAL.as_secs(),
         previous_line
+    );
+}
+
+async fn wait_for_digest_availability(
+    client: &JamfClient,
+    package_id: &str,
+) -> Result<PackageDigestSnapshot> {
+    let mut latest_snapshot: Option<PackageDigestSnapshot> = None;
+
+    for attempt in 1..=DIGEST_POLL_ATTEMPTS {
+        match client.get_package_digest_snapshot(package_id).await? {
+            Some(current) => {
+                if current.has_verifiable_content() {
+                    return Ok(current);
+                }
+
+                latest_snapshot = Some(current);
+                if attempt < DIGEST_POLL_ATTEMPTS {
+                    println!(
+                        "  Attempt {}/{}: digest fields incomplete, waiting {}s...",
+                        attempt,
+                        DIGEST_POLL_ATTEMPTS,
+                        DIGEST_POLL_INTERVAL.as_secs()
+                    );
+                }
+            }
+            None => {
+                if attempt < DIGEST_POLL_ATTEMPTS {
+                    println!(
+                        "  Attempt {}/{}: digest metadata unavailable, waiting {}s...",
+                        attempt,
+                        DIGEST_POLL_ATTEMPTS,
+                        DIGEST_POLL_INTERVAL.as_secs()
+                    );
+                }
+            }
+        }
+
+        if attempt < DIGEST_POLL_ATTEMPTS {
+            sleep(DIGEST_POLL_INTERVAL).await;
+        }
+    }
+
+    if let Some(latest) = latest_snapshot {
+        bail!(
+            "Upload completed but Jamf digest fields remained incomplete after {} seconds. Latest digest: {}.",
+            DIGEST_POLL_ATTEMPTS as u64 * DIGEST_POLL_INTERVAL.as_secs(),
+            latest.display_line()
+        );
+    }
+
+    bail!(
+        "Upload completed but Jamf digest metadata remained unavailable after {} seconds.",
+        DIGEST_POLL_ATTEMPTS as u64 * DIGEST_POLL_INTERVAL.as_secs()
     );
 }

@@ -24,11 +24,14 @@ impl PackageDigestSnapshot {
             && self.file_size.is_none()
     }
 
-    pub fn differs_from(&self, old: &Self) -> bool {
-        field_changed(old.md5_hash.as_deref(), self.md5_hash.as_deref())
-            || field_changed(old.hash_type.as_deref(), self.hash_type.as_deref())
-            || field_changed(old.hash_value.as_deref(), self.hash_value.as_deref())
-            || field_changed(old.file_size.as_ref(), self.file_size.as_ref())
+    pub fn has_verifiable_content(&self) -> bool {
+        self.md5_hash.is_some() || self.hash_value.is_some() || self.file_size.is_some()
+    }
+
+    pub fn content_updated_from(&self, old: &Self) -> bool {
+        value_became_known_or_changed(old.md5_hash.as_deref(), self.md5_hash.as_deref())
+            || value_became_known_or_changed(old.hash_value.as_deref(), self.hash_value.as_deref())
+            || value_became_known_or_changed(old.file_size.as_ref(), self.file_size.as_ref())
     }
 
     pub fn display_line(&self) -> String {
@@ -247,8 +250,9 @@ fn urlencoding(s: &str) -> String {
         .replace('+', "%2B")
 }
 
-fn field_changed<T: PartialEq + ?Sized>(old: Option<&T>, new: Option<&T>) -> bool {
+fn value_became_known_or_changed<T: PartialEq + ?Sized>(old: Option<&T>, new: Option<&T>) -> bool {
     match (old, new) {
+        (_, Some(_)) if old.is_none() => true,
         (Some(old), Some(new)) => old != new,
         _ => false,
     }
