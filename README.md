@@ -1,7 +1,6 @@
 # jamf-package-updater
 
-Small, focused, and built for one job:
-update a Jamf Pro package safely, without breaking the policies that depend on it.
+Safely update Jamf Pro packages in place — same ID, new payload, zero broken policies.
 
 Maintained by Photon.
 
