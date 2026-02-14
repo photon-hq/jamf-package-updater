@@ -1,0 +1,18 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    uses: photon-hq/buildspace/.github/workflows/rust-service-release.yaml@main
+    permissions:
+      contents: write
+      pull-requests: read
+    with:
+      service-name: jamf-package-updater
+      binary-name: jamf-package-updater
+      tap-repo: photon-hq/homebrew-photon
+      tap-formula: jamf-package-updater
+    secrets: inherit
