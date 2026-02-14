@@ -38,16 +38,10 @@ Required Jamf API privileges:
 
 ## Install
 
-```bash
-git clone <your-repo-url>
-cd jamf-package-updater
-cargo build --release
-```
-
-Binary path:
+### Homebrew 
 
 ```bash
-./target/release/jamf-package-updater
+brew install photon-hq/photon/jamf-package-updater
 ```
 
 ## Quick start
