@@ -69,8 +69,26 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
         None => {
             println!("Package not found — creating new package record...");
             let req = PackageCreateRequest::new_default(&package_name, &file_name);
-            let pkg = client.create_package(&req).await?;
-            println!("Created package '{}' (ID: {}).", package_name, pkg.id);
+            let created = client.create_package(&req).await?;
+            println!("Created package '{}' (ID: {}).", package_name, created.id);
+            let pkg_id = created.id;
+            // The create endpoint only returns an id+href; build a minimal
+            // Package from the request data so the rest of the flow works.
+            let pkg = crate::models::package::Package {
+                id: pkg_id,
+                package_name: req.package_name,
+                file_name: req.file_name,
+                category_id: req.category_id,
+                priority: req.priority,
+                fill_user_template: req.fill_user_template,
+                fill_existing_users: req.fill_existing_users,
+                reboot_required: req.reboot_required,
+                os_install: req.os_install,
+                suppress_updates: req.suppress_updates,
+                suppress_from_dock: req.suppress_from_dock,
+                suppress_eula: req.suppress_eula,
+                suppress_registration: req.suppress_registration,
+            };
             (pkg, true)
         }
     };

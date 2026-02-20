@@ -6,7 +6,7 @@ use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
 use crate::api::client::JamfClient;
-use crate::models::package::{Package, PackageCreateRequest, PackageSearchResponse};
+use crate::models::package::{HrefResponse, Package, PackageCreateRequest, PackageSearchResponse};
 
 #[derive(Debug, Clone, Default)]
 pub struct PackageDigestSnapshot {
@@ -82,7 +82,10 @@ impl JamfClient {
     }
 
     /// Create a new package record in Jamf Pro.
-    pub async fn create_package(&self, req: &PackageCreateRequest) -> Result<Package> {
+    ///
+    /// The Jamf API returns only `{ "id": "…", "href": "…" }` for POST
+    /// operations, so we return just the assigned ID.
+    pub async fn create_package(&self, req: &PackageCreateRequest) -> Result<HrefResponse> {
         let url = format!("{}/api/v1/packages", self.base_url);
 
         let resp = self

@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+/// Response returned by Jamf Pro for POST (create) operations — contains only
+/// the auto-assigned `id` and a resource `href`.
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct HrefResponse {
+    pub id: String,
+    pub href: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
