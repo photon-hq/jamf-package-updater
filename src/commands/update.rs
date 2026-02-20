@@ -159,8 +159,42 @@ pub async fn run(path: &Path, name: Option<&str>, priority: Option<i32>) -> Resu
 
     if let Some(previous) = previous_digest.as_ref() {
         println!("Waiting for Jamf digest metadata to update...");
-        let refreshed_digest = wait_for_digest_change(&client, &pkg_id, previous).await?;
-        println!("Digest updated: {}", refreshed_digest.display_line());
+        match wait_for_digest_change(&client, &pkg_id, previous).await {
+            Ok(refreshed_digest) => {
+                println!("Digest updated: {}", refreshed_digest.display_line());
+            }
+            Err(_) => {
+                // Digest didn't change — check whether the remote now matches
+                // the local file.  Rebuilds from identical source often produce
+                // files with different outer MD5s but identical payload content,
+                // so Jamf's stored digest stays the same.  Treat this as
+                // success when the remote MD5 matches the file we just uploaded.
+                let local_md5 = compute_file_md5(path).await?;
+                let remote_md5 = client
+                    .get_package_digest_snapshot(&pkg_id)
+                    .await?
+                    .and_then(|d| d.md5_hash);
+
+                if remote_md5
+                    .as_deref()
+                    .is_some_and(|r| r.eq_ignore_ascii_case(&local_md5))
+                {
+                    println!(
+                        "Digest unchanged but remote MD5 matches the uploaded file — content is identical."
+                    );
+                } else {
+                    bail!(
+                        "Upload completed but Jamf digest metadata did not update \
+                         after {} seconds and the remote MD5 ({}) does not match the \
+                         local file MD5 ({}). Previous digest: {}.",
+                        DIGEST_POLL_ATTEMPTS as u64 * DIGEST_POLL_INTERVAL.as_secs(),
+                        remote_md5.as_deref().unwrap_or("unavailable"),
+                        local_md5,
+                        previous.display_line()
+                    );
+                }
+            }
+        }
     } else {
         println!("Waiting for Jamf digest metadata to become available...");
         let digest = wait_for_digest_availability(&client, &pkg_id).await?;
