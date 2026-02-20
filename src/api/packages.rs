@@ -81,6 +81,31 @@ impl JamfClient {
         Ok(search.results.into_iter().next())
     }
 
+    /// Create a new package record in Jamf Pro.
+    pub async fn create_package(&self, req: &PackageCreateRequest) -> Result<Package> {
+        let url = format!("{}/api/v1/packages", self.base_url);
+
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .json(req)
+            .send()
+            .await
+            .context("Failed to create package")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Failed to create package (HTTP {}): {}", status, body);
+        }
+
+        resp.json()
+            .await
+            .context("Failed to parse create-package response")
+    }
+
     /// Update an existing package's metadata in-place.
     pub async fn update_package(&self, id: &str, req: &PackageCreateRequest) -> Result<()> {
         let url = format!("{}/api/v1/packages/{}", self.base_url, id);

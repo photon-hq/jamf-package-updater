@@ -45,6 +45,23 @@ pub struct PackageCreateRequest {
 }
 
 impl PackageCreateRequest {
+    pub fn new_default(package_name: &str, file_name: &str) -> Self {
+        Self {
+            package_name: package_name.to_string(),
+            file_name: file_name.to_string(),
+            category_id: "-1".to_string(),
+            priority: 3,
+            fill_user_template: false,
+            fill_existing_users: false,
+            reboot_required: false,
+            os_install: false,
+            suppress_updates: false,
+            suppress_from_dock: false,
+            suppress_eula: false,
+            suppress_registration: false,
+        }
+    }
+
     pub fn from_old(old: &Package, new_file_name: &str) -> Self {
         Self {
             package_name: old.package_name.clone(),

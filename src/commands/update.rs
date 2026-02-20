@@ -56,69 +56,85 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
     let client = JamfClient::connect(&creds.url, &creds.client_id, &creds.client_secret).await?;
     println!("Authenticated.");
 
-    // 4. Find existing package
+    // 4. Find existing package — or create a new record if it doesn't exist yet
     println!("Searching for package '{}'...", package_name);
-    let old_package = client
-        .find_package(&package_name)
-        .await?
-        .with_context(|| format!("Package '{}' not found in Jamf Pro", package_name))?;
-
-    let pkg_id = old_package.id.clone();
-    println!(
-        "Found package '{}' (ID: {}, file: {})",
-        package_name, pkg_id, old_package.file_name
-    );
-
-    let previous_digest = client.get_package_digest_snapshot(&pkg_id).await?;
-    match &previous_digest {
-        Some(digest) => println!("Current package digest: {}", digest.display_line()),
-        None => println!("Current package digest metadata is unavailable via API."),
-    }
-
-    // Exit early when Jamf already has the same payload (MD5 match).
-    if let Some(remote_md5) = previous_digest.as_ref().and_then(|d| d.md5_hash.as_deref()) {
-        let local_md5 = compute_file_md5(path).await?;
-        println!("Local file MD5: {}", local_md5);
-        if remote_md5.eq_ignore_ascii_case(&local_md5) {
-            println!("Package payload already matches Jamf (MD5 unchanged).");
+    let (package, is_new) = match client.find_package(&package_name).await? {
+        Some(pkg) => {
             println!(
-                "Package '{}' (ID: {}) is already up to date. Skipping update.",
-                package_name, pkg_id
+                "Found package '{}' (ID: {}, file: {})",
+                package_name, pkg.id, pkg.file_name
             );
-            return Ok(());
+            (pkg, false)
         }
-    }
-
-    // 5. Scan policies for references to this package
-    println!("Scanning policies...");
-    let affected_policies = client
-        .find_policies_with_package(&package_name, &old_package.file_name)
-        .await?;
-    println!(
-        "Found {} {} referencing this package.",
-        affected_policies.len(),
-        if affected_policies.len() == 1 {
-            "policy"
-        } else {
-            "policies"
+        None => {
+            println!("Package not found — creating new package record...");
+            let req = PackageCreateRequest::new_default(&package_name, &file_name);
+            let pkg = client.create_package(&req).await?;
+            println!("Created package '{}' (ID: {}).", package_name, pkg.id);
+            (pkg, true)
         }
-    );
-    for p in &affected_policies {
-        println!("  - {} (ID: {})", p.name, p.id);
-    }
+    };
 
-    // 6. Update package metadata in-place (keep same ID, update fileName)
-    println!("Updating package metadata...");
-    let update_req = PackageCreateRequest::from_old(&old_package, &file_name);
-    client.update_package(&pkg_id, &update_req).await?;
-    println!("Metadata updated.");
+    let pkg_id = package.id.clone();
 
-    // 7. Upload the new file
+    // For existing packages: check digest, skip if unchanged, scan policies, update metadata.
+    // For new packages: skip all of this — there is no existing payload or policy reference.
+    let previous_digest: Option<PackageDigestSnapshot> = if !is_new {
+        let digest = client.get_package_digest_snapshot(&pkg_id).await?;
+        match &digest {
+            Some(d) => println!("Current package digest: {}", d.display_line()),
+            None => println!("Current package digest metadata is unavailable via API."),
+        }
+
+        // Exit early when Jamf already has the same payload (MD5 match).
+        if let Some(remote_md5) = digest.as_ref().and_then(|d| d.md5_hash.as_deref()) {
+            let local_md5 = compute_file_md5(path).await?;
+            println!("Local file MD5: {}", local_md5);
+            if remote_md5.eq_ignore_ascii_case(&local_md5) {
+                println!("Package payload already matches Jamf (MD5 unchanged).");
+                println!(
+                    "Package '{}' (ID: {}) is already up to date. Skipping update.",
+                    package_name, pkg_id
+                );
+                return Ok(());
+            }
+        }
+
+        // Scan policies for references to this package
+        println!("Scanning policies...");
+        let affected_policies = client
+            .find_policies_with_package(&package_name, &package.file_name)
+            .await?;
+        println!(
+            "Found {} {} referencing this package.",
+            affected_policies.len(),
+            if affected_policies.len() == 1 {
+                "policy"
+            } else {
+                "policies"
+            }
+        );
+        for p in &affected_policies {
+            println!("  - {} (ID: {})", p.name, p.id);
+        }
+
+        // Update package metadata in-place (keep same ID, update fileName)
+        println!("Updating package metadata...");
+        let update_req = PackageCreateRequest::from_old(&package, &file_name);
+        client.update_package(&pkg_id, &update_req).await?;
+        println!("Metadata updated.");
+
+        digest
+    } else {
+        None
+    };
+
+    // Upload the file
     println!("Uploading {}...", file_name);
     client.upload_package(&pkg_id, path).await?;
     println!("Upload complete.");
 
-    // 8. Refresh JCDS inventory to recalculate checksums
+    // Refresh JCDS inventory to recalculate checksums
     println!("Refreshing package inventory (recalculating checksums)...");
     client.refresh_jcds_inventory().await?;
     println!("Inventory refresh requested.");
@@ -135,19 +151,15 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
 
     println!("Inventory refreshed.");
 
-    println!(
-        "Package '{}' (ID: {}) updated successfully.",
-        package_name, pkg_id
-    );
-    if !affected_policies.is_empty() {
+    if is_new {
         println!(
-            "{} {} will automatically use the new package.",
-            affected_policies.len(),
-            if affected_policies.len() == 1 {
-                "policy"
-            } else {
-                "policies"
-            }
+            "Package '{}' (ID: {}) created and uploaded successfully.",
+            package_name, pkg_id
+        );
+    } else {
+        println!(
+            "Package '{}' (ID: {}) updated successfully.",
+            package_name, pkg_id
         );
     }
 
