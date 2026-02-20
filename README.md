@@ -71,7 +71,47 @@ jamf-package-updater update /path/to/App-2.3.0.pkg --name "App Installer"
 
 ## CI / automation
 
-You can skip keyring storage and provide credentials via environment variables:
+### Reusable GitHub Actions workflow
+
+Other repositories can upload packages to Jamf Pro by calling this repo's reusable workflow. The calling job uploads the built `.pkg` or `.dmg` as a GitHub Actions artifact, then invokes the workflow:
+
+```yaml
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - # ... your build steps ...
+      - uses: actions/upload-artifact@v4
+        with:
+          name: myapp-installer
+          path: MyApp-2.3.0.pkg
+
+  upload-to-jamf:
+    needs: build
+    uses: photon-hq/jamf-package-updater/.github/workflows/jamf-upload.yml@main
+    with:
+      artifact_name: myapp-installer
+      jamf_url: https://your-instance.jamfcloud.com
+      # package_name: "MyApp"   # optional; defaults to the file stem
+    secrets:
+      JAMF_CLIENT_ID: ${{ secrets.JAMF_CLIENT_ID }}
+      JAMF_CLIENT_SECRET: ${{ secrets.JAMF_CLIENT_SECRET }}
+```
+
+**Inputs**
+
+| Input | Required | Description |
+|---|---|---|
+| `artifact_name` | yes | Name of the `upload-artifact` artifact containing the `.pkg`/`.dmg` |
+| `jamf_url` | yes | Jamf Pro URL (e.g. `https://acme.jamfcloud.com`) |
+| `package_name` | no | Jamf package record name; defaults to file stem |
+| `tool_ref` | no | Git ref of this repo to build (default: `main`) |
+
+**Secrets** — `JAMF_CLIENT_ID` and `JAMF_CLIENT_SECRET` must be set in the calling repository's secrets.
+
+### Environment variables (direct invocation)
+
+You can also skip keyring storage and provide credentials via environment variables:
 
 ```bash
 export JAMF_CLIENT_ID="..."
