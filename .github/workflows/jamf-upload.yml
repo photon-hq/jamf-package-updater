@@ -42,6 +42,15 @@ on:
         type: string
         default: ""
 
+      package_priority:
+        description: >
+          Package priority in Jamf Pro (0–20). Overrides the existing value
+          for updates and the default (3) for new packages. Leave empty to
+          keep the current behaviour.
+        required: false
+        type: string
+        default: ""
+
       jamf_url:
         description: >
           Full URL of the Jamf Pro instance, e.g. https://acme.jamfcloud.com
@@ -150,8 +159,11 @@ jobs:
           binary="./jamf-package-updater-src/target/release/jamf-package-updater"
           pkg_path="${{ steps.find-pkg.outputs.pkg_path }}"
 
+          args=("$binary" update "$pkg_path")
           if [ -n "${{ inputs.package_name }}" ]; then
-            "$binary" update "$pkg_path" --name "${{ inputs.package_name }}"
-          else
-            "$binary" update "$pkg_path"
+            args+=(--name "${{ inputs.package_name }}")
           fi
+          if [ -n "${{ inputs.package_priority }}" ]; then
+            args+=(--priority "${{ inputs.package_priority }}")
+          fi
+          "${args[@]}"

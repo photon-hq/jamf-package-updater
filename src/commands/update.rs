@@ -14,7 +14,7 @@ use crate::models::package::PackageCreateRequest;
 const DIGEST_POLL_ATTEMPTS: usize = 12;
 const DIGEST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
-pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
+pub async fn run(path: &Path, name: Option<&str>, priority: Option<i32>) -> Result<()> {
     // 1. Resolve package name
     let file_name = path
         .file_name()
@@ -68,7 +68,7 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
         }
         None => {
             println!("Package not found — creating new package record...");
-            let req = PackageCreateRequest::new_default(&package_name, &file_name);
+            let req = PackageCreateRequest::new_default(&package_name, &file_name, priority);
             let created = client.create_package(&req).await?;
             println!("Created package '{}' (ID: {}).", package_name, created.id);
             let pkg_id = created.id;
@@ -138,7 +138,7 @@ pub async fn run(path: &Path, name: Option<&str>) -> Result<()> {
 
         // Update package metadata in-place (keep same ID, update fileName)
         println!("Updating package metadata...");
-        let update_req = PackageCreateRequest::from_old(&package, &file_name);
+        let update_req = PackageCreateRequest::from_old(&package, &file_name, priority);
         client.update_package(&pkg_id, &update_req).await?;
         println!("Metadata updated.");
 

@@ -17,7 +17,11 @@ async fn main() {
             client_secret,
             url,
         } => commands::auth::run(client_id, client_secret, url),
-        Commands::Update { path, name } => commands::update::run(path, name.as_deref()).await,
+        Commands::Update {
+            path,
+            name,
+            priority,
+        } => commands::update::run(path, name.as_deref(), *priority).await,
     };
 
     if let Err(e) = result {

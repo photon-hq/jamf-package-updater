@@ -69,6 +69,12 @@ Or pass an explicit Jamf package name:
 jamf-package-updater update /path/to/App-2.3.0.pkg --name "App Installer"
 ```
 
+Set a custom package priority (default is 3 for new packages, preserved for updates):
+
+```bash
+jamf-package-updater update /path/to/App-2.3.0.pkg --priority 10
+```
+
 ## CI / automation
 
 ### Reusable GitHub Actions workflow
@@ -92,7 +98,8 @@ jobs:
     with:
       artifact_name: myapp-installer
       jamf_url: https://your-instance.jamfcloud.com
-      # package_name: "MyApp"   # optional; defaults to the file stem
+      # package_name: "MyApp"       # optional; defaults to the file stem
+      # package_priority: "10"      # optional; defaults to 3 for new packages
     secrets:
       JAMF_CLIENT_ID: ${{ secrets.JAMF_CLIENT_ID }}
       JAMF_CLIENT_SECRET: ${{ secrets.JAMF_CLIENT_SECRET }}
@@ -105,6 +112,7 @@ jobs:
 | `artifact_name` | yes | Name of the `upload-artifact` artifact containing the `.pkg`/`.dmg` |
 | `jamf_url` | yes | Jamf Pro URL (e.g. `https://acme.jamfcloud.com`) |
 | `package_name` | no | Jamf package record name; defaults to file stem |
+| `package_priority` | no | Package priority (0–20); defaults to 3 for new packages, preserved for updates |
 | `tool_ref` | no | Git ref of this repo to build (default: `main`) |
 
 **Secrets** — `JAMF_CLIENT_ID` and `JAMF_CLIENT_SECRET` must be set in the calling repository's secrets.
@@ -127,7 +135,7 @@ Environment variables take precedence over keyring values.
 
 ```bash
 jamf-package-updater auth --client-id <id> --client-secret <secret> --url <jamf-url>
-jamf-package-updater update <path-to-pkg-or-dmg> [--name <package-name>]
+jamf-package-updater update <path-to-pkg-or-dmg> [--name <package-name>] [--priority <0-20>]
 ```
 
 ## Behavior notes

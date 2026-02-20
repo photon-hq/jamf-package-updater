@@ -35,5 +35,10 @@ pub enum Commands {
         /// Package name to match in Jamf Pro (defaults to file stem)
         #[arg(long)]
         name: Option<String>,
+
+        /// Package priority in Jamf Pro (0–20). Overrides the existing value
+        /// for updates and the default (3) for new packages.
+        #[arg(long)]
+        priority: Option<i32>,
     },
 }
