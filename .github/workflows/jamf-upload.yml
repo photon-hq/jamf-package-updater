@@ -1,0 +1,157 @@
+# .github/workflows/jamf-upload.yml
+#
+# Reusable workflow: uploads a .pkg or .dmg artifact to Jamf Pro
+# using jamf-package-updater.
+#
+# Call this from another repository with:
+#
+#   jobs:
+#     upload-to-jamf:
+#       needs: build
+#       uses: photon-hq/jamf-package-updater/.github/workflows/jamf-upload.yml@main
+#       with:
+#         artifact_name: my-pkg-artifact
+#         jamf_url: https://acme.jamfcloud.com
+#       secrets:
+#         JAMF_CLIENT_ID: ${{ secrets.JAMF_CLIENT_ID }}
+#         JAMF_CLIENT_SECRET: ${{ secrets.JAMF_CLIENT_SECRET }}
+#
+# The calling job must have already uploaded the package file as a GitHub
+# Actions artifact using actions/upload-artifact@v4. The artifact_name input
+# must match that upload name exactly.
+
+name: Jamf Package Upload
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        description: >
+          Name of the GitHub Actions artifact containing the .pkg or .dmg file.
+          The artifact must have been uploaded in the same workflow run by the
+          calling job using actions/upload-artifact@v4.
+        required: true
+        type: string
+
+      package_name:
+        description: >
+          Package name to match in Jamf Pro. If omitted, the tool uses the
+          file stem (e.g. "MyApp-2.3.0" from "MyApp-2.3.0.pkg"). Pass this
+          when the Jamf package record name differs from the file stem.
+        required: false
+        type: string
+        default: ""
+
+      jamf_url:
+        description: >
+          Full URL of the Jamf Pro instance, e.g. https://acme.jamfcloud.com
+          This is not a secret — it identifies which instance to target and
+          appears in logs to aid debugging. Store it as a repository variable
+          (vars.JAMF_URL) in calling repos.
+        required: true
+        type: string
+
+      tool_ref:
+        description: >
+          Git ref (branch, tag, or SHA) of jamf-package-updater to build.
+          Defaults to "main". Pin to a specific tag (e.g. "v1.2.0") for
+          reproducible builds.
+        required: false
+        type: string
+        default: "main"
+
+    secrets:
+      JAMF_CLIENT_ID:
+        description: Jamf Pro OAuth client ID.
+        required: true
+      JAMF_CLIENT_SECRET:
+        description: Jamf Pro OAuth client secret.
+        required: true
+
+jobs:
+  upload-to-jamf:
+    name: Upload package to Jamf Pro
+    runs-on: ubuntu-latest
+
+    steps:
+      # Download the package artifact from the calling workflow run.
+      # actions/download-artifact@v4 in a workflow_call context shares the
+      # parent run's artifact namespace, so no run-id override is needed.
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ./package
+
+      # Locate the .pkg or .dmg file and record its path for later steps.
+      # Fails clearly if zero or multiple matching files are found.
+      - name: Locate package file
+        id: find-pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing=()
+          for f in ./package/*.pkg ./package/*.dmg; do
+            [ -f "$f" ] && existing+=("$f")
+          done
+          if [ ${#existing[@]} -eq 0 ]; then
+            echo "ERROR: No .pkg or .dmg file found in artifact '${{ inputs.artifact_name }}'" >&2
+            echo "Contents of artifact:" >&2
+            ls -la ./package/ >&2
+            exit 1
+          fi
+          if [ ${#existing[@]} -gt 1 ]; then
+            echo "ERROR: Multiple package files found in artifact. Expected exactly one." >&2
+            printf '  %s\n' "${existing[@]}" >&2
+            exit 1
+          fi
+          pkg_path="${existing[0]}"
+          echo "pkg_path=${pkg_path}" >> "$GITHUB_OUTPUT"
+          echo "Found package: ${pkg_path}"
+
+      # Check out the jamf-package-updater source to build the binary.
+      - name: Check out jamf-package-updater
+        uses: actions/checkout@v4
+        with:
+          repository: photon-hq/jamf-package-updater
+          ref: ${{ inputs.tool_ref }}
+          path: ./jamf-package-updater-src
+
+      # Install the Rust stable toolchain. edition = "2024" requires Rust 1.85+;
+      # stable is always well above this floor.
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Cache Cargo registry, index, and build artifacts. The cache key
+      # includes the Cargo.lock hash so it is invalidated when dependencies
+      # change. Warm cache runs take ~30s instead of ~2-3 minutes.
+      - name: Cache Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./jamf-package-updater-src -> target"
+
+      # Build the release binary. --locked ensures Cargo.lock is respected
+      # exactly, giving reproducible builds.
+      - name: Build jamf-package-updater
+        run: cargo build --release --locked
+        working-directory: ./jamf-package-updater-src
+
+      # Run the upload. Credentials are passed as environment variables, which
+      # credentials.rs reads before falling back to the system keyring — so
+      # the keyring is never invoked in CI.
+      - name: Upload package to Jamf Pro
+        env:
+          JAMF_CLIENT_ID: ${{ secrets.JAMF_CLIENT_ID }}
+          JAMF_CLIENT_SECRET: ${{ secrets.JAMF_CLIENT_SECRET }}
+          JAMF_URL: ${{ inputs.jamf_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="./jamf-package-updater-src/target/release/jamf-package-updater"
+          pkg_path="${{ steps.find-pkg.outputs.pkg_path }}"
+
+          if [ -n "${{ inputs.package_name }}" ]; then
+            "$binary" update "$pkg_path" --name "${{ inputs.package_name }}"
+          else
+            "$binary" update "$pkg_path"
+          fi
