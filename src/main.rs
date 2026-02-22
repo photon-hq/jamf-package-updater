@@ -21,7 +21,8 @@ async fn main() {
             path,
             name,
             priority,
-        } => commands::update::run(path, name.as_deref(), *priority).await,
+            digest_wait_seconds,
+        } => commands::update::run(path, name.as_deref(), *priority, *digest_wait_seconds).await,
     };
 
     if let Err(e) = result {

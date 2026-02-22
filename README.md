@@ -18,7 +18,7 @@ and confirms which policies are affected.
 - Updates package metadata in place (same package ID).
 - Uploads a new `.pkg` or `.dmg` file with retry support.
 - Triggers JCDS inventory refresh so checksums are recalculated.
-- Verifies digest metadata changes after refresh and errors if Jamf still reports old values.
+- Verifies digest metadata changes after refresh (waits up to 300s by default).
 - Skips the update entirely when local file MD5 already matches Jamf package MD5.
 
 ## Requirements
@@ -73,6 +73,12 @@ Set a custom package priority (default is 3 for new packages, preserved for upda
 
 ```bash
 jamf-package-updater update /path/to/App-2.3.0.pkg --priority 10
+```
+
+Increase digest wait time for slower Jamf instances:
+
+```bash
+jamf-package-updater update /path/to/App-2.3.0.pkg --digest-wait-seconds 600
 ```
 
 ## CI / automation

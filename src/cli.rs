@@ -40,5 +40,9 @@ pub enum Commands {
         /// for updates and the default (3) for new packages.
         #[arg(long)]
         priority: Option<i32>,
+
+        /// Maximum seconds to wait for Jamf digest metadata to update after upload.
+        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
+        digest_wait_seconds: u64,
     },
 }
