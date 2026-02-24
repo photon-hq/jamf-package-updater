@@ -11,7 +11,7 @@ impl JamfClient {
         let resp = self
             .http
             .get(&url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token().await?)
             .header("Accept", "application/json")
             .send()
             .await
@@ -43,7 +43,7 @@ impl JamfClient {
         let resp = self
             .http
             .get(&url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token().await?)
             .header("Accept", "application/xml")
             .send()
             .await

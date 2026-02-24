@@ -61,7 +61,7 @@ impl JamfClient {
         let resp = self
             .http
             .get(&url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token().await?)
             .header("Accept", "application/json")
             .send()
             .await
@@ -91,7 +91,7 @@ impl JamfClient {
         let resp = self
             .http
             .post(&url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token().await?)
             .header("Accept", "application/json")
             .json(req)
             .send()
@@ -116,7 +116,7 @@ impl JamfClient {
         let resp = self
             .http
             .put(&url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token().await?)
             .json(req)
             .send()
             .await
@@ -169,7 +169,7 @@ impl JamfClient {
             let resp = self
                 .http
                 .post(&url)
-                .bearer_auth(&self.token)
+                .bearer_auth(&self.token().await?)
                 .header("Accept", "application/json")
                 .multipart(form)
                 .send()
@@ -204,7 +204,7 @@ impl JamfClient {
         let resp = self
             .http
             .post(&url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token().await?)
             .header("Accept", "application/json")
             .send()
             .await
@@ -233,7 +233,7 @@ impl JamfClient {
         let resp = self
             .http
             .get(&url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token().await?)
             .header("Accept", "application/json")
             .send()
             .await
