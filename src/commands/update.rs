@@ -159,6 +159,14 @@ pub async fn run(
         None
     };
 
+    // For existing packages, delete the old JCDS file first.  The v1 upload
+    // endpoint silently no-ops when a backing file already exists in JCDS.
+    if !is_new {
+        println!("Removing old JCDS file before re-upload...");
+        client.delete_jcds_file(&file_name).await?;
+        println!("Old file removed.");
+    }
+
     // Upload the file
     println!("Uploading {}...", file_name);
     client.upload_package(&pkg_id, path).await?;
@@ -203,12 +211,12 @@ pub async fn run(
                         "Digest unchanged but remote MD5 matches the uploaded file — content is identical."
                     );
                 } else {
-                    eprintln!(
-                        "Warning: Jamf digest metadata did not update within \
-                         {} seconds. The remote MD5 ({}) does not yet match the \
+                    bail!(
+                        "Upload completed but Jamf digest metadata did not update \
+                         after {} seconds and the remote MD5 ({}) does not match the \
                          local file MD5 ({}). Previous digest: {}. \
-                         This is expected when Jamf is slow to recalculate digests — \
-                         the upload itself likely succeeded.",
+                         If your Jamf instance is slow to recalculate digests, \
+                         retry with --digest-wait-seconds 600.",
                         digest_wait_timeout.as_secs(),
                         remote_md5.as_deref().unwrap_or("unavailable"),
                         local_md5,

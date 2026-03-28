@@ -223,6 +223,37 @@ impl JamfClient {
         Ok(())
     }
 
+    /// Delete a file from the Jamf Cloud Distribution Service.
+    ///
+    /// This must be called before re-uploading a package whose backing file
+    /// already exists in JCDS, because the v1 upload endpoint silently
+    /// no-ops when a file is already present.
+    pub async fn delete_jcds_file(&self, file_name: &str) -> Result<()> {
+        let url = format!("{}/api/v1/jcds/files/{}", self.base_url, file_name);
+
+        let resp = self
+            .http
+            .delete(&url)
+            .bearer_auth(&self.token().await?)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .context("Failed to delete JCDS file")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to delete JCDS file '{}' (HTTP {}): {}",
+                file_name,
+                status,
+                body
+            );
+        }
+
+        Ok(())
+    }
+
     /// Read package digest/checksum fields as currently reported by Jamf Pro.
     pub async fn get_package_digest_snapshot(
         &self,
