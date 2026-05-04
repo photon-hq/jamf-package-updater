@@ -15,4 +15,5 @@ jobs:
       binary-name: jamf-package-updater
       tap-repo: photon-hq/homebrew-photon
       tap-formula: jamf-package-updater
+      use-blacksmith: true
     secrets: inherit
